@@ -1,6 +1,86 @@
 import streamlit as st
 import pickle
 import pandas as pd
+import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
+
+class SkewTransformer(BaseEstimator, TransformerMixin):
+    """
+    Transform numerical columns based on skewness measured at fit time.
+    
+    transform_map_: dict column -> str code in {'identity','sqrt','neg_sqrt','log1p','cbrt'}
+    """
+    def __init__(self, clip_negative=True):
+        """ Clip negativ prevent null data """
+        self.clip_negative = clip_negative 
+
+    def _decide_rule(self, skew):
+        """Give skewness series"""
+        if skew < -1:
+            return 'cbrt'
+        elif -1 <= skew < -0.5:
+            return 'neg_sqrt'
+        elif 0.5 < skew <= 1:
+            return 'sqrt'
+        elif 1 < skew <= 2:
+            return 'log1p'
+        elif skew > 2:
+            return 'cbrt'
+        else:
+            return 'identity'
+    
+    def fit(self, X, y=None):
+        """Get datafram column and skewness"""
+        # Check dataframe or array
+        if isinstance(X, np.ndarray):
+            X = pd.DataFrame(X)
+            
+        # Get column
+        self.columns_ = X.columns if hasattr(X, "columns") else np.arange(X.shape[1])
+        
+        # Make dataframe column and skew
+        self.transform_map_ = {}
+        
+        # Looping for fill transform_map_ 
+        for col in self.columns_:
+            skew = pd.Series(X[col]).skew()
+            self.transform_map_[col] = self._decide_rule(skew)
+        return self
+    
+    def _apply_rule(self, s, rule):
+        """Form rule clip not negative and return transformation"""
+        if rule == 'identity':
+            return s
+        elif rule == 'sqrt':
+            if self.clip_negative:
+                s = np.clip(s, 0, None)
+            return np.sqrt(s)
+        elif rule == 'neg_sqrt':
+            if self.clip_negative:
+                s = np.clip(s, 0, None)
+            return -np.sqrt(s)
+        elif rule == 'log1p':
+            if self.clip_negative:
+                s = np.clip(s, 0, None)
+            return np.log1p(s)
+        elif rule == 'cbrt':
+            return np.cbrt(s)
+        else:
+            return s
+    
+    def transform(self, X):
+        """Tranformation base on skew"""
+        # Check datafreame or array
+        is_df = hasattr(X, "columns")
+        if not is_df:
+            X = pd.DataFrame(X, columns=self.columns_)
+        X_out = X.copy()
+        
+        # Looping to apply rule
+        for col in self.columns_:
+            rule = self.transform_map_.get(col, 'identity')
+            X_out[col] = self._apply_rule(X_out[col], rule)
+        return X_out if is_df else X_out.values
 
 with open('./src/best_model.pkl', 'rb') as file:
     best_model = pickle.load(file)
